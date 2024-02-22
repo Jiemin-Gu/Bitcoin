@@ -1,6 +1,7 @@
 import React, {
     useState,
     useEffect,
+    useCallback
 } from 'react';
 import {
     LineChart,
@@ -60,131 +61,97 @@ const DailyBlockCounts = ({
     );
 };
 
-// Define your GraphQL query
-const query = `
-query {
-  bitcoin {
-    blocks(options: {desc: "date.date", limit: 365}) {
-      date {
-        date
-      }
-      count
-    }
-  }
-}
-`;
-const postData = {
-  query: query
-};
-
-// Define the URL of your GraphQL API endpoint
-const url = 'https://graphql.bitquery.io';
-const token = 'BQY5zH8uvBQ1h2sMZXogQTnkKc2Hk9QA';
-
-const config = {
-  headers: {
-    'Content-Type': 'application/json',
-    'X-API-KEY': `${token}` // Include the bearer token in the Authorization header
-  }
-};
-
-async function asyncFetch() {
-     const waitData = await axios.post(url, postData, config)
-      .then(response => {
-        console.log("response: ", response);
-        const aggregated = response.data.data.bitcoin.blocks.map(obj => ({
-          date: obj.date.date,
-          count: obj.count
-        }));
-
-        console.log("aggregated: ", aggregated);
-        return aggregated.reverse();
-      })
-      .catch(error => {
-        console.error('Error:', error);
-      });
-
-     console.log(waitData);
-     return waitData;
-};
-
+// Adjustments made here for clarity and direct initialization
 const App = () => {
-    const [allData, setData] = useState([]);
+    const [data, setData] = useState([]); // Holds the original fetched data
+    const [filteredData, setFilteredData] = useState([]); // Holds data filtered by time range
 
-    // State for the filtered data
-    const [filteredData, setFilteredData] = useState([]);
+    // Function to fetch and initially filter data
+    const fetchDataAndFilter = async () => {
+        try {
+            const response = await axios.post('https://graphql.bitquery.io', {
+                query: `
+                    query {
+                        bitcoin {
+                            blocks(options: {desc: "date.date", limit: 1900}) {
+                                date {
+                                    date
+                                }
+                                count
+                            }
+                        }
+                    }
+                `,
+            }, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-KEY': 'BQY5zH8uvBQ1h2sMZXogQTnkKc2Hk9QA', // Replace with your actual API Key
+                }
+            });
 
-    // State for the selected time range
-    const [timeRange, setTimeRange] = useState('1M');
+            const fetchedData = response.data.data.bitcoin.blocks.map(block => ({
+                date: block.date.date,
+                count: block.count
+            }));
 
-    // Function to filter data based on time range
-    const filterData = (range) => {
-        setTimeRange(range);
+            setData(fetchedData.reverse());
+            filterDataByRange(fetchedData, '1M'); // Directly filter for 1M data on fetch
+        } catch (error) {
+            console.error("Error fetching data:", error);
+        }
+    };
+
+    // Function to filter data by time range
+    const filterDataByRange = (inputData, range) => {
         const endDate = moment();
-        const startDate = endDate.clone().subtract(range === '1Y' ? 12 : range, 'months');
+        let startDate;
 
-        console.log("allData: ", allData);
-        return allData.filter((data) => {
-            const dataDate = moment(data.date, 'YYYY-MM-DD');
-            return dataDate.isBetween(startDate, endDate, undefined, '[]'); // inclusive of start and end date
+        switch(range) {
+            case '1M':
+                startDate = endDate.clone().subtract(1, 'months');
+                break;
+            case '3M':
+                startDate = endDate.clone().subtract(3, 'months');
+                break;
+            case '1Y':
+                startDate = endDate.clone().subtract(1, 'years');
+                break;
+            case '3Y':
+                startDate = endDate.clone().subtract(3, 'years');
+                break;
+            case '5Y':
+                startDate = endDate.clone().subtract(5, 'years');
+                break;
+            default:
+                startDate = endDate.clone().subtract(1, 'months');
+        }
+
+        const result = inputData.filter(({ date }) => {
+            const dateMoment = moment(date, 'YYYY-MM-DD');
+            return dateMoment.isBetween(startDate, endDate, undefined, '[]');
         });
+
+        setFilteredData(result);
     };
 
-    // Effect to set the default filtered data to the last 1 month
+    // Effect to fetch and set data on component mount
     useEffect(() => {
-        asyncFetch().then(data => setData(data));
-    }, []); // Empty dependency array to run only once on mount
+        fetchDataAndFilter();
+    }, []);
 
-    // Handler for time range change
-    const handleTimeRangeChange = (range) => {
-        const newFilteredData = filterData(range);
-        setFilteredData(newFilteredData);
-    };
-
-    return ( <
-        div style = {
-            {
-                width: '100%',
-                height: '400px'
-            }
-        } >
-        <
-        h2 > Daily Block Counts < /h2> <
-        div style = {
-            {
-                position: 'absolute',
-                top: '10px',
-                right: '10px'
-            }
-        } >
-        <
-        button onClick = {
-            () => handleTimeRangeChange('1')
-        }
-        disabled = {
-            timeRange === '1'
-        } > 1 M < /button> <
-        button onClick = {
-            () => handleTimeRangeChange('3')
-        }
-        disabled = {
-            timeRange === '3'
-        } > 3 M < /button> <
-        button onClick = {
-            () => handleTimeRangeChange('12')
-        }
-        disabled = {
-            timeRange === '12'
-        } > 1 Y < /button> <
-        /div> <
-        DailyBlockCounts data = {
-            filteredData
-        }
-        /> <
-        p > Update time: {
-            moment().format('YYYY-MM-DD')
-        } < /p> <
-        /div>
+    return (
+        <div style={{ width: '100%', height: '400px' }}>
+            <h2>Daily Block Counts</h2>
+            <div style={{ position: 'absolute', top: '10px', right: '10px' }}>
+                <button onClick={() => filterDataByRange(data, '1M')}>1M</button>
+                <button onClick={() => filterDataByRange(data, '3M')}>3M</button>
+                <button onClick={() => filterDataByRange(data, '1Y')}>1Y</button>
+                <button onClick={() => filterDataByRange(data, '3Y')}>3Y</button>
+                <button onClick={() => filterDataByRange(data, '5Y')}>5Y</button>
+            </div>
+            <DailyBlockCounts data={filteredData} />
+            <p>Update time: {moment().format('YYYY-MM-DD')}</p>
+        </div>
     );
 };
 
